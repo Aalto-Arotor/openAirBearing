@@ -615,7 +615,7 @@ def _render_progress_state(progress_state):
     if not progress_state:
         return (
             {"height": "10px", "width": "0%", "backgroundColor": "#4caf50"},
-            "Idle (click solve! to compute results)",
+            "Idle (click solve to compute results)",
         )
 
     status = progress_state.get("status")
@@ -897,7 +897,7 @@ def register_callbacks(app):
         """Update bearing geometry after input settles.
 
         Solver results are intentionally not recomputed on every input change.
-        Results get computed via the explicit `solve!` flow.
+        Results get computed via the explicit `solve` flow.
         """
         if not app_state:
             raise dash.exceptions.PreventUpdate

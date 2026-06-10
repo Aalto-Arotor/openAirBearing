@@ -82,8 +82,8 @@ def rectangular_velocity_compare():
 
     figures = []
 
-    # Performance metrics and pressure contours grid (3x2)
-    fig_perf, axes = plt.subplots(3, 2, figsize=(10, 12))
+    # Performance metrics and pressure contours grid
+    fig_perf, axes = plt.subplots(2, 3, figsize=(12, 8))
     ab.plot_load_capacity(reference_bearing, results, ax=axes[0, 0])
     ab.plot_stiffness(reference_bearing, results, ax=axes[0, 1])
     ab.plot_supply_flow_rate(reference_bearing, results, ax=axes[1, 0])
@@ -92,13 +92,13 @@ def rectangular_velocity_compare():
         reference_bearing,
         [cases[0][2]],
         title="Pressure distribution (0 m/s)",
-        ax=axes[2, 0],
+        ax=axes[0, 2],
     )
     ab.plot_pressure_2d(
         reference_bearing,
         [cases[-1][2]],
         title=f"Pressure distribution ({velocities[-1]:.0f} m/s)",
-        ax=axes[2, 1],
+        ax=axes[1, 2],
     )
     fig_perf.tight_layout()
     figures.append(fig_perf)

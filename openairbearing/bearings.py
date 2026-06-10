@@ -352,8 +352,10 @@ class CircularBearing(BaseBearing):
         self.geom_1d = self._coalesce(self.geom_1d, lambda: get_geom_1d(self))
         self.geom_2d = self._coalesce(
             self.geom_2d,
-            lambda: get_geom_2d(
-                self, x=self.fem_2d.basis.doflocs[0], y=self.fem_2d.basis.doflocs[1]
+            lambda: self.geom_func_2d(
+                bearing=self,
+                x=self.fem_2d.basis.doflocs[0],
+                y=self.fem_2d.basis.doflocs[1],
             ),
         )
 
@@ -425,8 +427,10 @@ class AnnularBearing(BaseBearing):
         self.geom_1d = self._coalesce(self.geom_1d, lambda: get_geom_1d(self))
         self.geom_2d = self._coalesce(
             self.geom_2d,
-            lambda: get_geom_2d(
-                self, x=self.fem_2d.basis.doflocs[0], y=self.fem_2d.basis.doflocs[1]
+            lambda: self.geom_func_2d(
+                bearing=self,
+                x=self.fem_2d.basis.doflocs[0],
+                y=self.fem_2d.basis.doflocs[1],
             ),
         )
 
@@ -528,8 +532,10 @@ class RectangularBearing(BaseBearing):
         self.geom_func_2d = self._coalesce(self.geom_func_2d, lambda: get_geom_2d)
         self.geom_2d = self._coalesce(
             self.geom_2d,
-            lambda: get_geom_2d(
-                self, x=self.fem_2d.basis.doflocs[0], y=self.fem_2d.basis.doflocs[1]
+            lambda: self.geom_func_2d(
+                bearing=self,
+                x=self.fem_2d.basis.doflocs[0],
+                y=self.fem_2d.basis.doflocs[1],
             ),
         )
 
