@@ -541,7 +541,7 @@ def create_results_layout(bearing, results):
                     html.Div(
                         [
                             html.Button(
-                                "solve!",
+                                "solve",
                                 id="solve-results-btn",
                                 title="Solve selected results",
                                 style={
@@ -585,7 +585,7 @@ def create_results_layout(bearing, results):
                                 style={"flex": "1 1 auto", "minWidth": "180px"},
                             ),
                             html.Div(
-                                "Idle (click solve! to compute results)",
+                                "Idle (click solve to compute results)",
                                 id="solve-progress-text",
                                 style={
                                     "fontSize": "12px",
