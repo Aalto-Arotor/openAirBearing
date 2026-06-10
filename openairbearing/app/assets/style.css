@@ -24,17 +24,11 @@ link[rel="shortcut icon"] {
 
 /* Comprehensive input styling */
 input[type="number"] {
-    -moz-appearance: textfield;
-    -webkit-appearance: textfield;
-    appearance: textfield;
+    -moz-appearance: number-input;
+    appearance: auto;
     border: 1px solid #ddd;
     border-radius: 4px;
     padding: 4px;
-}
-
-/* Firefox */
-input[type="number"] {
-    -moz-appearance: textfield;
 }
 
 /* Remove validation styling */

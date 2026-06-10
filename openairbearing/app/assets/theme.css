@@ -1,0 +1,16 @@
+html, body, #_dash-app-content {
+  background-color: #e9edf0; /* light engineering gray */
+}
+
+/* optional: keep content boxes readable */
+.js-plotly-plot,
+.dash-graph,
+input,
+.Select-control {
+  background-color: #ffffff;
+}
+
+/* Any div with an inline border gets white background */
+div[style*="border"] {
+  background-color: #ffffff !important;
+}

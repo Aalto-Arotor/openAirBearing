@@ -1,31 +1,37 @@
-import numpy as np
+"""Utility functions for bearing calculations and data containers.
+
+Provides bearing property calculations (area, geometry, stiffness, flow rates)
+and Result dataclass for storing solver outputs.
+"""
+
 from dataclasses import dataclass
+
+import numpy as np
 
 
 @dataclass
 class Result:
-    """Class to hold bearing calculation results"""
+    """Container for solver outputs."""
 
     name: str
-    p: np.ndarray
     w: np.ndarray
     k: np.ndarray
     qs: np.ndarray
     qa: np.ndarray
     qc: np.ndarray
+    p: np.ndarray = None
+    p_1d: list = None
+    p_2d: list = None
+    p_3d: list = None
+    moment: np.ndarray = None
+    shear_force: np.ndarray = None
+    color: str = None
 
 
-# def get_y(bearing):
-#     b = bearing
-#     if b.ny == 1:
-#         return 1
-#     elif b.case =="rectangular":
-#         return np.linspace(-b.ya / 2, b.ya / 2, b.ny)
-#     elif b.case == "circular" or "annular":
-#         return np.linspace(0, b.ya, b.ny)
-
-
-def get_area(bearing):
+def get_area(bearing) -> float:
+    """
+    Calculate the bearing area.
+    """
     b = bearing
     match b.case:
         case "circular":
@@ -37,75 +43,145 @@ def get_area(bearing):
         case "rectangular":
             A = b.xa * b.ya
         case "journal":
-            A = 2 * np.pi * b.xa * b.ya
+            A = b.xa * b.ya
         case _:
             raise ValueError(f"Unknown case: {b.case}")
-
     return A
 
 
-def get_geom(bearing):
+def get_geom_1d(bearing, *, x=None):
     """
-    Calculate the geometry of the bearing.
+    Calculate the geometry error height at a given position x,
+    normalized so that min(geom) = 0 over the bearing domain.
     """
     b = bearing
-    if b.ny == 1:
+    err = float(b.error)
+    xa = float(b.xa)
+    x = b.x if x is None else x
+
+    def calc_raw(x):
         match b.error_type:
             case "none":
-                geom = np.zeros(b.nx)
+                return np.zeros_like(x)
             case "linear":
-                geom = b.error * (1 - b.x / b.xa)
+                return err * (1.0 - x / xa)
             case "quadratic":
-                geom = b.error * (1 - b.x**2 / b.xa**2)
+                return err * (1.0 - (x / xa) ** 2)
             case _:
-                raise ValueError(f"Unknown error type: {b.error_type}")
+                return np.zeros_like(x)
 
-    else:
-        if b.csys == "cartesian":
+    xs = np.array([np.min(b.x), np.max(b.x)])
+    if xs[0] < 0 < xs[1]:
+        xs.append(0)
+    min_val = np.min(calc_raw(xs))
 
-            x = b.x[:, None]
-            y = b.y[None, :]
-            zeros = np.zeros((b.nx, b.ny))
+    return calc_raw(x) - min_val
+
+
+def get_geom_2d(bearing, *, x, y):
+    """
+    Calculate geometry error height at position (x, y),
+    normalized so that min(geom) = 0 over the bearing domain.
+
+    Args:
+        bearing: Bearing object with properties (error, xa, ya, csys, etc.)
+        x: x-coordinate (or r for polar)
+        y: y-coordinate (or theta for polar, default 0)
+
+    Returns:
+        np.ndarray or float: Geometry error height at (x, y).
+    """
+    b = bearing
+    err = float(b.error)
+    xa = float(b.xa)
+    ya = b.ya if b.ya != 0 else b.xa
+
+    def calc_raw(x, y):
+        if b.csys == "polar":
+            r = (x**2 + y**2) ** 0.5
             match b.error_type:
                 case "none":
-                    geom = zeros
+                    return np.zeros_like(x)
                 case "linear":
-                    geom = (
-                        b.error
-                        * 2
-                        * np.maximum(np.abs(x) / b.xa + zeros, np.abs(y) / b.ya + zeros)
-                    )
+                    return err * (1.0 - r / xa)
                 case "quadratic":
-                    geom = (
-                        b.error
-                        * 4
-                        * np.maximum((x / b.xa) ** 2 + zeros, (y / b.ya) ** 2 + zeros)
-                    )
+                    return err * (1.0 - (r / xa) ** 2)
+                case "saddle":
+                    return err * 0.5 * (1.0 - (x / xa) ** 2 + (y / ya) ** 2)
                 case "tiltx":
-                    geom = b.error * b.x[:, None] / b.xa + zeros
+                    return err * 0.5 * (x / xa)
                 case "tilty":
-                    geom = b.error * b.y / b.ya + zeros
+                    return err * 0.5 * (y / ya)
                 case _:
                     raise ValueError(f"Unknown error type: {b.error_type}")
 
-        elif b.csys == "polar":
-            r = b.x[:, None]
-            theta = b.y[None, :]
-
+        elif b.csys == "cartesian":
+            if b.case == "journal" and b.error_type in {"conicity", "misalignment"}:
+                return get_geom_2d_journal(b, x=x, y=y)
             match b.error_type:
                 case "none":
-                    geom = np.zeros((b.nx, b.ny))
+                    return np.zeros_like(x)
                 case "linear":
-                    geom = b.error * (1 - r / b.xa) + np.zeros_like(theta)
+                    return err * 2.0 * np.maximum((np.abs(x) / xa), (np.abs(y) / ya))
                 case "quadratic":
-                    geom = b.error * (1 - (r / b.xa) ** 2) + np.zeros_like(theta)
+                    return err * 4.0 * np.maximum((x / xa) ** 2, (y / ya) ** 2)
+                case "saddle":
+                    return err * 0.5 * (1.0 - (x / xa) ** 2 + (y / ya) ** 2)
+                case "tiltx":
+                    return err * 0.5 * (x / xa)
+                case "tilty":
+                    return err * 0.5 * (y / ya)
                 case _:
                     raise ValueError(f"Unknown error type: {b.error_type}")
-
         else:
             raise ValueError(f"Unknown coordinate system: {b.csys}")
 
-    return geom - np.min(geom)
+    geom_raw = calc_raw(x, y)
+    if b.case == "journal" and b.error_type == "misalignment":
+        return np.asarray(geom_raw, dtype=float)
+
+    min_val = np.min(calc_raw(b.fem_2d.basis.doflocs[0], b.fem_2d.basis.doflocs[1]))
+    return geom_raw - min_val
+
+
+def get_geom_2d_journal(bearing, *, x, y):
+    """Return journal-specific geometry error fields on an unwrapped surface.
+
+    Supported journal error modes:
+    - ``none``: no geometry error
+        - ``conicity``: axial taper, where one end is narrower than the other
+        - ``misalignment``: shaft-axis tilt about the journal centerline, producing
+            opposite circumferential offsets at opposite axial ends
+    """
+    b = bearing
+    err = float(b.error)
+    x = np.asarray(x, dtype=float)
+    y = np.asarray(y, dtype=float)
+
+    x_span = float(np.max(b.x) - np.min(b.x))
+    if np.isclose(x_span, 0.0):
+        axial = np.zeros_like(x)
+    else:
+        x_mid = 0.5 * (float(np.max(b.x)) + float(np.min(b.x)))
+        axial = (x - x_mid) / x_span
+
+    y_span = float(np.max(b.y) - np.min(b.y))
+    if np.isclose(y_span, 0.0):
+        theta = np.zeros_like(y)
+    else:
+        theta = 2.0 * np.pi * (y - float(np.min(b.y))) / y_span
+
+    match b.error_type:
+        case "none":
+            geom = np.zeros_like(x)
+        case "conicity":
+            geom = err * (axial + 0.5)
+        case "misalignment":
+            geom = err * axial * np.cos(theta)
+        case _:
+            geom = np.zeros_like(x)
+
+    return np.asarray(geom, dtype=float)
 
 
 def get_beta(bearing):
@@ -125,7 +201,7 @@ def get_kappa(bearing):
     Calculate the permeability.
 
     Returns:
-        float: Permeability, kappa.
+        float: Permeability, kappa (m^2).
     """
     b = bearing
 
@@ -140,10 +216,10 @@ def get_kappa(bearing):
 
 def get_Qsc(bearing):
     """
-    Calculate the permeability.
+    Calculate free-flow rate at supply pressure.
 
     Returns:
-        float: Permeability, kappa.
+        float: Free flow rate Qsc (L/min).
     """
     b = bearing
 
@@ -157,32 +233,23 @@ def get_Qsc(bearing):
 
 
 def round_to_sig_dig(number, digits):
+    """Round a scalar to the requested number of significant digits."""
     return np.round(number, -int(np.floor(np.log10(np.abs(number)))) + (digits - 1))
 
 
 def get_dA(bearing) -> np.ndarray:
+    """Return per-node integration area weights for the bearing coordinate system."""
     b = bearing
-    if b.ny == 1:
-        match b.csys:
-            case "polar":
-                dA = np.pi * np.gradient(b.x**2)
-                dA[[0, -1]] = dA[[0, -1]] / 2
-            case "cartesian":
-                dA = b.dx.copy()
-                dA[[0, -1]] = dA[[0, -1]] / 2
-            case _:
-                raise ValueError("Error: invalid csys in dA calculation")
-    else:
-        match b.csys:
-            case "polar":
-                dx2 = b.x**2 - np.insert(b.x[:-1], 0, bearing.xc) ** 2
-                dy = b.y - np.insert(b.y[:-1], 0, 0)
-                dA = 0.5 * dx2[None, :] * dy[:, None]
-            case "cartesian":
-                dA = b.dx * b.dy
-            case _:
-                raise ValueError("Error: invalid csys in dA calculation")
-    return dA
+    match b.csys:
+        case "polar":
+            dA = np.pi * np.gradient(b.x**2)
+            dA[[0, -1]] = dA[[0, -1]] / 2
+        case "cartesian":
+            dA = b.dx.copy()
+            dA[[0, -1]] = dA[[0, -1]] / 2
+        case _:
+            raise ValueError("Error: invalid csys in dA calculation")
+    return dA[:, None]
 
 
 def get_load_capacity(bearing, p: np.ndarray) -> np.ndarray:
@@ -190,53 +257,57 @@ def get_load_capacity(bearing, p: np.ndarray) -> np.ndarray:
     Calculate the load capacity of the bearing.
 
     Args:
-        p (numpy.ndarray): The pressure distribution.
+        p (np.ndarray): Pressure distribution.
 
     Returns:
-        numpy.ndarray: The calculated load capacity.
+        np.ndarray: Load capacity versus film height.
     """
     b = bearing
     p_rel = p - b.pa
-    if b.case == "journal":
-        w_x = p_rel * np.cos(b.theta)[None, :, None] * b.xa * b.dx * b.dy
-        w = np.sum(w_x, axis=(0, 1))
-    elif p.ndim == 2:
-        ny = b.ny
-        b.ny = 1
-        dA = get_dA(b)
-        b.ny = ny
-        w = np.sum(p_rel * dA[:, None], axis=0)
-    else:
-        dA = get_dA(b)
-        w = np.sum(p_rel * dA, axis=(0, 1))
+    dA = get_dA(b)
+    w = np.sum(p_rel * dA, axis=(0))
     return w
 
 
-def get_stiffness(bearing, w):
+def get_stiffness(bearing, w: np.ndarray) -> np.ndarray:
     """
     Calculate the stiffness.
-
     Args:
-        w (numpy.ndarray): The load or deflection values.
+        bearing: Bearing instance containing geometry and properties
+        w (numpy.ndarray): The load capacity array.
 
     Returns:
-        numpy.ndarray: The stiffness values.
+        np.ndarray: Stiffness curve computed as -dW/dh (N/µm).
     """
     b = bearing
-    if b.case == "journal":
-        k = np.gradient(w, b.e.flatten())
-    else:
-        k = -np.gradient(w, b.ha.flatten())
+    k = -np.gradient(w) / np.gradient(b.h) * 1e-6  # N per µm
     return k
 
 
-def get_volumetric_flow(bearing, p: np.ndarray, soltype: str) -> tuple:
-    """Calculate volumetric flow rates through the bearing.
+def get_supply_flow(bearing, p: np.ndarray) -> np.ndarray:
+    """Calculate supply flow rate into the bearing.
 
     Args:
         bearing: Bearing instance containing geometry and properties
         p (np.ndarray): Pressure distribution array
-        soltype (bool): Solution type (ANALYTIC or NUMERIC)
+
+    Returns:
+        np.ndarray: Supply flow rate (L/min)
+    """
+    b = bearing
+    dA = get_dA(b)
+    qs_per_A = b.kappa * 6e4 * (b.ps**2 - p**2) / (2 * b.mu * b.hp * b.pa)
+    qs = np.sum(qs_per_A * dA, axis=(0))
+    return qs
+
+
+def get_volumetric_flow(bearing, p: np.ndarray) -> tuple:
+    """
+    Calculate volumetric flow rates through the bearing.
+
+        Args:
+            bearing: Bearing instance containing geometry and properties
+            p (np.ndarray): Pressure distribution array
 
     Returns:
         tuple: (qs, qa, qc) where:
@@ -245,103 +316,30 @@ def get_volumetric_flow(bearing, p: np.ndarray, soltype: str) -> tuple:
             - qc (np.ndarray): Chamber flow rate (L/min)
     """
     b = bearing
-    if soltype == "analytic" or soltype == "numeric":
-        # 1D case
-        match soltype:
-            case "analytic":
-                h = b.ha
-            case "numeric":
-                h = b.ha + b.geom[:, None]
 
-        match b.csys:
-            case "polar":
-                q = (
-                    -6e4
-                    * h**3
-                    * b.rho
-                    * np.gradient(p**2, axis=0)
-                    * np.pi
-                    * b.x[:, None]
-                    / (12 * b.mu * b.pa * b.dx[:, None])
-                )
-            case "cartesian":
-                q = (
-                    -6e4
-                    * h**3
-                    * b.rho
-                    * np.gradient(p**2, axis=0)
-                    / (12 * b.mu * b.pa * b.dx[:, None])
-                )
-            case _:
-                raise ValueError("Invalid csys")
+    h = b.ha
 
-        qa = q[-1, :]
-        qc = q[1, :]
-        qs = qa - qc
+    match b.csys:
+        case "polar":
+            q = (
+                -6e4
+                * h**3
+                * np.gradient(p**2, axis=0)
+                * np.pi
+                * b.x[:, None]
+                / (12 * b.mu * b.pa * b.dx[:, None])
+            )
+        case "cartesian":
+            q = (
+                -6e4
+                * h**3
+                * np.gradient(p**2, axis=0)
+                / (24 * b.mu * b.pa * b.dx[:, None])
+            )
+        case _:
+            raise ValueError("Invalid csys")
 
-    elif soltype == "numeric2d":
-        h = b.ha[None, None, :] + b.geom.T[:, :, None]
-        match b.csys:
-            case "polar":
-                qx = (
-                    -6e4
-                    * h**3
-                    * b.rho
-                    * np.gradient(p**2, axis=1)
-                    / (2 * np.pi)
-                    * b.x[None, :, None]
-                    * b.dy[:, None, None]
-                    / (12 * b.mu * b.pa * b.dx[None, :, None])
-                )
-                qy = 0
-                qa = np.sum(qx[:, -1, :], axis=0)
-                qc = np.sum(qx[:, 0, :], axis=0)
-            case "cartesian":
-                if b.case == "rectangular":
-                    qx = (
-                        -6e4
-                        * h**3
-                        * b.rho
-                        * np.gradient(p**2, axis=1)
-                        * b.dy
-                        / (12 * b.mu * b.pa * b.dx)
-                    )
-                    qy = (
-                        -6e4
-                        * h**3
-                        * b.rho
-                        * np.gradient(p**2, axis=0)
-                        * b.dx
-                        / (12 * b.mu * b.pa * b.dy)
-                    )
-
-                    qa = np.sum(np.abs(qx[:, (0, -1), :]), axis=(0, 1)) + np.sum(
-                        abs(qy[(0, -1), :, :]), axis=(0, 1)
-                    )
-                    qc = 0
-                elif b.case == "journal":
-                    h = np.transpose(b.clearance + b.geom[:, :, None], (1, 0, 2))
-                    qx = (
-                        -6e4
-                        * h**3
-                        * b.rho
-                        * np.gradient(p**2, axis=1)
-                        * b.dy
-                        / (12 * b.mu * b.pa * b.dx)
-                    )
-                    qy = (
-                        -6e4
-                        * h**3
-                        * b.rho
-                        * np.gradient(p**2, axis=0)
-                        * b.dx
-                        * b.xa
-                        / (12 * b.mu * b.pa * b.dy)
-                    )
-                    qa = np.sum(qy[-1, :, :], axis=(0))
-                    qc = np.sum(qy[0, :, :], axis=(0))
-            case _:
-                qa, qc = 0, 0
-
-        qs = qa - qc
+    qa = q[-1, :]
+    qc = q[1, :]
+    qs = get_supply_flow(b, p)
     return qs, qa, qc
