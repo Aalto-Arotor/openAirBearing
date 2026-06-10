@@ -1,8 +1,5 @@
 .DS_Store
 .venv
-/__pycache__
-/openairbearing/__pycache__
-/openairbearing/app/__pycache__
-/tests/__pycache__
+__pycache__/
 /openairbearing.egg-info
 /dist
