@@ -118,6 +118,9 @@ celerybeat.pid
 .venv
 env/
 venv/
+
+# OpenAirBearing local runtime cache
+.openairbearing-cache/
 ENV/
 env.bak/
 venv.bak/
@@ -174,4 +177,5 @@ __marimo__/
 
 
 .DS_Store
+.vtk
 .vtk

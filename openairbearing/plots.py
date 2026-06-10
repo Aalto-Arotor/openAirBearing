@@ -1,707 +1,1002 @@
+"""Plotting utilities for bearing analysis and visualization.
+
+This module provides functions for plotting bearing performance metrics (load capacity,
+stiffness, flow rates), pressure distributions (1D and 2D), geometric shapes, and
+comprehensive result summaries. Functions support both analytical
+and FEM-based solutions.
+"""
+
+import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 import numpy as np
-import plotly.subplots as sp
-import plotly.graph_objects as go
-from scipy.interpolate import griddata
+from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+from matplotlib.ticker import FuncFormatter
+from skfem.visuals.matplotlib import plot as skfem_plot
 
-# Plot styling
-PLOT_FONT = dict(
-    family="Arial",
-    size=12,
-)
+AUTO_COLORS = [
+    "blue",
+    "red",
+    "black",
+    "magenta",
+    "gray",
+    "purple",
+    "green",
+    "yellow",
+    "cyan",
+    "orange",
+]
 
-# Define solver colors at the top level with other constants
-SOLVER_COLORS = {
-    "analytic": "blue",
-    "numeric": "red",
-    "numeric2d": "red",
-}
+AUTO_LINESTYLES = [
+    "solid",
+]
 
-# Common axis properties
-AXIS_STYLE = dict(
-    title_font=PLOT_FONT,
-    tickfont=PLOT_FONT,
-    showline=True,
-    showgrid=False,
-    linecolor="black",
-    ticks="inside",
-    mirror=True,
-)
-FIG_LAYOUT = dict(
-    font=PLOT_FONT,
-    plot_bgcolor="white",
-    paper_bgcolor="white",
-    legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="center", x=0.5),
-    showlegend=True,
-    margin=dict(l=10, r=10, t=50, b=10),
-)
+AUTO_MARKERS = [
+    "none",
+]
+
+AUTO_HIGHLIGHT_MARKERS = [
+    "o",
+]
 
 
-def plot_key_results(bearing, results):
-    """Plot key results."""
-    figs = []
-    b = bearing
+def _validate_style_cycle(values, *, name):
+    """Validate style cycle values and return as a list."""
+    if values is None:
+        raise ValueError(f"{name} cannot be None")
+    values = list(values)
+    if len(values) == 0:
+        raise ValueError(f"{name} must contain at least one item")
+    return values
 
-    figs.append(plot_load_capacity(b, results))
-    figs.append(plot_stiffness(b, results))
-    figs.append(plot_pressure_distribution(b, results))
-    figs.append(plot_supply_flow_rate(b, results))
-    figs.append(plot_ambient_flow_rate(b, results))
-    if b.type == "seal":
-        figs.append(plot_chamber_flow_rate(b, results))
-    return figs
+
+def _apply_title(ax, title):
+    """Apply title, allowing None to disable it."""
+    if title is None:
+        ax.set_title("")
+    else:
+        ax.set_title(title)
+
+
+def _style_legend(legend):
+    """Apply consistent legend frame styling."""
+    if legend is None:
+        return
+    frame = legend.get_frame()
+    frame.set_facecolor("white")
+    frame.set_edgecolor("black")
+
+
+def _apply_mm_axis_format(ax):
+    """Format x/y axes in millimeters when mesh coordinates are in meters."""
+    ax.xaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value * 1e3:g}"))
+    ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{value * 1e3:g}"))
+
+
+def _as_list(results):
+    """Convert a single result or list of results into a list.
+
+    Args:
+        results: A Result object or list of Result objects.
+
+    Returns:
+        list: Results as a list for uniform processing.
+    """
+    return [results] if not isinstance(results, list) else results
+
+
+def assign_result_styles(
+    results, *, colors=AUTO_COLORS, styles=AUTO_LINESTYLES, markers=AUTO_MARKERS
+):
+    """Assign consistent colors and styles to each result in a sequence.
+
+    Result attributes already set (``color``, ``linestyle``, ``marker``) are left
+    untouched to preserve manual overrides. Call this once after collecting all
+    results and before any plotting. Assigned styles persist on Result objects.
+
+    Args:
+        results: A Result object or list of Result objects.
+        colors: List of color names to assign cyclically. Defaults to AUTO_COLORS.
+        styles: List of line styles to assign cyclically. Defaults to AUTO_LINESTYLES.
+        markers: List of marker styles to assign cyclically. Defaults to AUTO_MARKERS.
+
+    Returns:
+        list: Results list with assigned color/style/marker fields.
+    """
+    results = _as_list(results)
+    colors = _validate_style_cycle(colors, name="colors")
+    styles = _validate_style_cycle(styles, name="styles")
+    markers = _validate_style_cycle(markers, name="markers")
+
+    color_idx = 0
+    style_idx = 0
+    marker_idx = 0
+    for result in results:
+        if getattr(result, "color", None) is None:
+            result.color = colors[color_idx % len(colors)]
+            color_idx += 1
+        if getattr(result, "linestyle", None) is None:
+            result.linestyle = styles[style_idx % len(styles)]
+            style_idx += 1
+        if getattr(result, "marker", None) is None:
+            result.marker = markers[marker_idx % len(markers)]
+            marker_idx += 1
+    return results
+
+
+def _solver_color(result, *, index=None):
+    """Return a color for the result with fallback priority.
+
+    Color priority:
+    1. ``result.color`` – set manually or by assign_result_styles().
+    2. ``AUTO_COLORS[index]`` – per-plot fallback when no color is stored.
+    3. 'gray' – final fallback.
+
+    Args:
+        result: Result object.
+        index: Optional index for AUTO_COLORS fallback.
+
+    Returns:
+        str: Color name for plotting.
+    """
+    color = getattr(result, "color", None)
+    if color is not None:
+        return color
+    if index is not None:
+        return AUTO_COLORS[index % len(AUTO_COLORS)]
+    return "gray"
+
+
+def _solver_linestyle(result, *, index=None):
+    """Return a linestyle for the result with fallback priority."""
+    linestyle = getattr(result, "linestyle", None)
+    if linestyle is not None:
+        return linestyle
+    if index is not None:
+        return AUTO_LINESTYLES[index % len(AUTO_LINESTYLES)]
+    return "solid"
+
+
+def _solver_marker(result, *, index=None):
+    """Return a marker for the result with fallback priority."""
+    marker = getattr(result, "marker", None)
+    if marker is not None:
+        return marker
+    if index is not None:
+        return AUTO_MARKERS[index % len(AUTO_MARKERS)]
+    return "o"
+
+
+def _solver_highlight_marker(result, *, index=None):
+    """Return a highlight marker for max-k points with fallback priority."""
+    highlight_marker = getattr(result, "highlight_marker", None)
+    if highlight_marker is not None:
+        return highlight_marker
+    if index is not None:
+        return AUTO_HIGHLIGHT_MARKERS[index % len(AUTO_HIGHLIGHT_MARKERS)]
+    return "o"
+
+
+def _metric_magnitude_2d(array):
+    """Compute magnitude of 2D vector array (e.g., moment or shear force).
+
+    Args:
+        array: 2D array where columns 0 and 1 are vector components.
+
+    Returns:
+        np.ndarray or None: Magnitude of vectors, or None if input is invalid.
+    """
+    arr = np.asarray(array)
+    if arr.ndim == 2 and arr.shape[1] >= 2:
+        return np.sqrt(arr[:, 0] ** 2 + arr[:, 1] ** 2)
+    return None
+
+
+def _ensure_axes(ax=None, *, projection=None, figsize=None):
+    """Ensure axes are available, creating figure if needed.
+
+    Args:
+        ax: Existing matplotlib axes or None to create new.
+        projection: Projection type ('3d' or None).
+        figsize: Figure size tuple (width, height) in inches.
+
+    Returns:
+        tuple: (figure, axes, was_created) where was_created
+            indicates if new axes were created.
+    """
+    if ax is not None:
+        return ax.figure, ax, False
+
+    if projection == "3d":
+        fig = plt.figure(figsize=figsize)
+        ax = fig.add_subplot(111, projection="3d")
+        return fig, ax, True
+
+    fig, ax = plt.subplots(figsize=figsize)
+    return fig, ax, True
+
+
+def _resolve_pressure_index(result, n_fields, pressure_index=None):
+    """Resolve pressure index with max-stiffness default and bounds checks.
+
+    Args:
+        result: Result object with optional ``k`` array.
+        n_fields: Number of available pressure fields.
+        pressure_index: Optional explicit pressure index. Supports negative indexing.
+
+    Returns:
+        int: Valid pressure index.
+
+    Raises:
+        IndexError: If the resolved index is out of range.
+    """
+    if n_fields <= 0:
+        raise IndexError("No pressure fields available")
+
+    if pressure_index is None:
+        k_values = np.asarray(getattr(result, "k", []))
+        idx = int(np.argmax(k_values)) if k_values.size > 0 else 0
+    else:
+        idx = int(pressure_index)
+
+    if idx < 0:
+        idx += n_fields
+    if idx < 0 or idx >= n_fields:
+        raise IndexError(
+            f"pressure_index {pressure_index} out of range for {n_fields} fields"
+        )
+    return idx
+
+
+def _select_pressure_field(result, *, pressure_index=None):
+    """Select pressure field from a result.
+
+    Args:
+        result: Result object with p_2d and optional k attributes.
+        pressure_index: Optional pressure field index. Defaults to max stiffness index.
+
+    Returns:
+        np.ndarray or None: Selected pressure field, or None if unavailable.
+    """
+    if getattr(result, "p_2d", None) is None:
+        return None
+    idx = _resolve_pressure_index(
+        result, len(result.p_2d), pressure_index=pressure_index
+    )
+    return result.p_2d[idx]
+
+
+def _plot_metric(
+    bearing, results, values_getter, *, ylabel, title, legend=True, ax=None
+):
+    """Plot a metric (load, stiffness, flow, etc.) vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        values_getter: Callable that extracts metric values
+            from a Result (e.g., lambda r: r.k).
+        ylabel: Label for y-axis.
+        title: Plot title. Use None to disable the title.
+        legend: Whether to show legend. Defaults to True.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    results = _as_list(results)
+    fig, ax, created_new = _ensure_axes(ax=ax)
+    xh = bearing.ha * 1e6
+
+    for idx, result in enumerate(results):
+        y = values_getter(result)
+        if y is None:
+            continue
+        y = np.asarray(y)
+        if y.ndim != 1 or len(y) != len(xh):
+            continue
+        color = _solver_color(result, index=idx)
+        linestyle = _solver_linestyle(result, index=idx)
+        marker = _solver_marker(result, index=idx)
+        highlight_marker = _solver_highlight_marker(result, index=idx)
+        idx_k_max = int(np.argmax(result.k))
+        ax.plot(
+            xh, y, color=color, linestyle=linestyle, marker=marker, label=result.name
+        )
+        ax.scatter(
+            [xh[idx_k_max]], [y[idx_k_max]], color=color, marker=highlight_marker, s=25
+        )
+
+    ax.set_xlabel("h (μm)")
+    ax.set_ylabel(ylabel)
+    _apply_title(ax, title)
+    if legend:
+        _style_legend(ax.legend())
+    ax.grid(False)
+    if created_new:
+        fig.tight_layout()
+    return fig
+
+
+def plot_load_capacity(
+    bearing, results, *, legend=True, title="Load capacity", ax=None
+):
+    """Plot load capacity vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: getattr(r, "w", None),
+        ylabel="w (N)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_stiffness(bearing, results, *, legend=True, title="Static stiffness", ax=None):
+    """Plot static stiffness vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: getattr(r, "k", None),
+        ylabel="k (N/μm)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_supply_flow_rate(
+    bearing, results, *, legend=True, title="Supply flow", ax=None
+):
+    """Plot supply flow rate vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: getattr(r, "qs", None),
+        ylabel="q_s (L/min)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_chamber_flow_rate(
+    bearing, results, *, legend=True, title="Chamber flow", ax=None
+):
+    """Plot chamber flow rate vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: getattr(r, "qc", None),
+        ylabel="q_c (L/min)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_ambient_flow_rate(
+    bearing, results, *, legend=True, title="Ambient flow", ax=None
+):
+    """Plot ambient flow rate vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: getattr(r, "qa", None),
+        ylabel="q_a (L/min)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_moment(bearing, results, *, legend=True, title="Tilting moment", ax=None):
+    """Plot tilting moment magnitude vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: _metric_magnitude_2d(getattr(r, "moment", None)),
+        ylabel="M (N·m)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_shear_force(bearing, results, *, legend=True, title="Shear force", ax=None):
+    """Plot shear force magnitude vs film thickness.
+
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    return _plot_metric(
+        bearing,
+        results,
+        lambda r: _metric_magnitude_2d(getattr(r, "shear_force", None)),
+        ylabel="F (N)",
+        title=title,
+        legend=legend,
+        ax=ax,
+    )
+
+
+def plot_pressure_1d(
+    bearing,
+    results,
+    *,
+    p_index=None,
+    pressure_index=None,
+    legend=True,
+    title="Pressure distribution",
+    ax=None,
+):
+    """Plot 1D pressure distribution.
+
+    Supports both grid-based (analytic, result.p) and FEM DOF-based
+    (result.p_1d) pressure data.
+
+    Args:
+        bearing: Bearing object with x coordinates.
+        results: Result object or list of Result objects with p or p_1d.
+        p_index: Optional pressure index. Defaults to max stiffness index.
+        pressure_index: Alias for ``p_index``.
+        legend: Whether to show legend. Defaults to True.
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    results = _as_list(results)
+    fig, ax, created_new = _ensure_axes(ax=ax)
+
+    for idx, result in enumerate(results):
+        p_grid = getattr(result, "p", None)
+        p_1d = getattr(result, "p_1d", None)
+
+        if p_grid is not None:
+            x_coords = bearing.x
+            p_profiles = np.asarray(p_grid)
+        elif p_1d is not None:
+            sort_idx = np.argsort(bearing.fem_1d.basis.doflocs[0])
+            x_coords = bearing.fem_1d.basis.doflocs[0][sort_idx]
+            p_profiles = np.asarray(p_1d)[:, sort_idx].T
+        else:
+            continue
+
+        if p_index is not None and pressure_index is not None:
+            raise ValueError("Use only one of p_index or pressure_index")
+
+        selected_index = pressure_index if pressure_index is not None else p_index
+        h_idx = _resolve_pressure_index(
+            result,
+            p_profiles.shape[1],
+            pressure_index=selected_index,
+        )
+
+        pressures = (p_profiles[:, h_idx] - bearing.pa) * 1e-6
+        ax.plot(
+            x_coords * 1e3,
+            pressures,
+            label=result.name,
+            color=_solver_color(result, index=idx),
+            linestyle=_solver_linestyle(result, index=idx),
+            marker=_solver_marker(result, index=idx),
+        )
+
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("p (MPa)")
+    _apply_title(ax, title)
+    if legend:
+        _style_legend(ax.legend())
+    ax.grid(False)
+    if created_new:
+        fig.tight_layout()
+    return fig
+
+
+def get_pressure_2d_z_range(bearing, results):
+    """Compute pressure range (min/max) across all 2D results for consistent colorbar.
+
+    Args:
+        bearing: Bearing object with ambient pressure reference ``pa``.
+        results: Result object or list of Result objects with p_2d.
+
+    Returns:
+        list: [min_pressure_mpa, max_pressure_mpa] normalized by ambient pressure.
+    """
+    results = [r for r in _as_list(results) if getattr(r, "p_2d", None) is not None]
+    if not results:
+        return [0.0, 1.0]
+
+    z_min_pa = np.inf
+    z_max_pa = -np.inf
+    for result in results:
+        for pfield in result.p_2d:
+            z = np.asarray(pfield).ravel()
+            zr = np.nan_to_num(z - bearing.pa, nan=0.0, posinf=0.0, neginf=0.0)
+            z_min_pa = min(z_min_pa, float(np.min(zr)))
+            z_max_pa = max(z_max_pa, float(np.max(zr)))
+
+    if not np.isfinite(z_min_pa):
+        z_min_pa = 0.0
+    if not np.isfinite(z_max_pa) or z_max_pa <= 0:
+        z_max_pa = 1.0
+
+    return [z_min_pa * 1e-6, z_max_pa * 1e-6]
+
+
+def plot_pressure_2d(
+    bearing,
+    results,
+    *,
+    pressure_index=None,
+    legend=True,
+    slider=True,
+    include_frames=True,
+    show_colorbar=True,
+    z_range_mpa=None,
+    style="surface",
+    title="auto",
+    ax=None,
+):
+    """Plot 2D pressure distribution using scikit-fem visualization.
+
+    Args:
+        bearing: Bearing object with fem_2d.basis for mesh interpolation.
+        results: Result object or list of Result objects with p_2d.
+        pressure_index: Optional pressure field index. Defaults to max stiffness index.
+        legend: Unused, kept for compatibility.
+        slider: Unused, kept for compatibility.
+        include_frames: Unused, kept for compatibility.
+        show_colorbar: Whether to show colorbar. Defaults to True.
+        z_range_mpa: Optional [min, max] pressure range in MPa for colorbar scaling.
+        style: Unused, kept for compatibility with previous API.
+        title: Plot title. Use "auto" for default dynamic title or None to disable.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    del legend, slider, include_frames, style
+
+    results = _as_list(results)
+    result = next((r for r in results if getattr(r, "p_2d", None) is not None), None)
+    if result is None:
+        return empty_figure()
+
+    pfield = _select_pressure_field(result, pressure_index=pressure_index)
+    z_mpa = (np.asarray(pfield).ravel() - bearing.pa) * 1e-6
+
+    z_range = (
+        z_range_mpa
+        if z_range_mpa is not None
+        else get_pressure_2d_z_range(bearing, [result])
+    )
+
+    fig, ax, created_new = _ensure_axes(ax=ax)
+    skfem_plot(
+        bearing.fem_2d.basis,
+        z_mpa,
+        ax=ax,
+        cmap="jet",
+        nrefs=1,
+        vmin=z_range[0],
+        vmax=z_range[1],
+        colorbar=False,
+    )
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
+    _apply_mm_axis_format(ax)
+    title_text = (
+        f"Pressure distribution ({getattr(result, 'name', 'result')})"
+        if title == "auto"
+        else title
+    )
+    _apply_title(ax, title_text)
+    ax.set_aspect("equal")
+    if show_colorbar:
+        mappable = ax.collections[-1] if ax.collections else None
+        if mappable is not None:
+            fig.colorbar(mappable, ax=ax, label="p (MPa)")
+    if created_new:
+        fig.tight_layout()
+    return fig
+
+
+def plot_xy_shape(bearing, *, title="XY profile", ax=None):
+    """Plot bearing footprint in XY plane.
+
+    Args:
+        bearing: Bearing object with geometry properties (case, xa, ya, xc).
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    fig, ax, created_new = _ensure_axes(ax=ax)
+    case = bearing.case
+
+    if case in ("circular", "annular"):
+        theta = np.linspace(0, 2 * np.pi, 300)
+        ax.fill(
+            bearing.xa * np.cos(theta) * 1e3,
+            bearing.xa * np.sin(theta) * 1e3,
+            color="lightgray",
+            edgecolor="black",
+        )
+        if case == "annular":
+            ax.fill(
+                bearing.xc * np.cos(theta) * 1e3,
+                bearing.xc * np.sin(theta) * 1e3,
+                color="white",
+                edgecolor="black",
+            )
+        ax.set_aspect("equal")
+    elif case == "rectangular":
+        x = 0.5 * bearing.xa * 1e3
+        y = 0.5 * bearing.ya * 1e3
+        ax.fill([-x, -x, x, x], [-y, y, y, -y], color="lightgray", edgecolor="black")
+        ax.set_aspect("equal")
+    else:
+        ax.plot([0, bearing.xa * 1e3], [0, 0], color="black")
+
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
+    _apply_mm_axis_format(ax)
+    _apply_title(ax, title)
+    if created_new:
+        fig.tight_layout()
+    return fig
+
+
+def plot_xz_shape(bearing, *, title="XZ profile", ax=None):
+    """Plot bearing geometry profile in XZ plane.
+
+    Args:
+        bearing: Bearing object with geometry properties (x, geom_1d).
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    fig, ax, created_new = _ensure_axes(ax=ax)
+    if getattr(bearing, "geom_1d", None) is None:
+        return empty_figure()
+
+    x = np.asarray(getattr(bearing, "x", [])) * 1e3
+    z = np.asarray(bearing.geom_1d) * 1e6
+    ax.plot(x, z, color="black")
+    ax.fill_between(x, z, z.max() + 1, color="lightgray", alpha=0.6)
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("Shape (μm)")
+    _apply_title(ax, title)
+    if created_new:
+        fig.tight_layout()
+    return fig
+
+
+def plot_geometry_error(bearing, *, title="Mesh & Geometry", ax=None):
+    """Plot 3D mesh with geometry error field.
+
+    Args:
+        bearing: Bearing object with fem_2d.basis and geom_2d (2D geometry field).
+        title: Plot title. Use None to disable the title.
+        ax: Matplotlib axes or None to create new.
+
+    Returns:
+        matplotlib.figure.Figure: Figure containing the plot.
+    """
+    basis_2d = getattr(getattr(bearing, "fem_2d", None), "basis", None)
+    if basis_2d is None or getattr(bearing, "geom_2d", None) is None:
+        return empty_figure()
+
+    fig, ax, created_new = _ensure_axes(ax=ax)
+    z_um = np.asarray(bearing.geom_2d).ravel() * 1e6
+
+    if getattr(ax, "name", None) == "3d":
+        x_mm = np.asarray(basis_2d.doflocs[0]).ravel() * 1e3
+        y_mm = np.asarray(basis_2d.doflocs[1]).ravel() * 1e3
+        triangulation = mtri.Triangulation(x_mm, y_mm)
+        surface = ax.plot_trisurf(
+            triangulation,
+            z_um,
+            cmap="jet",
+            linewidth=0.0,
+            antialiased=False,
+        )
+        ax.set_xlabel("x (mm)")
+        ax.set_ylabel("y (mm)")
+        ax.set_zlabel("z (μm)")
+        _apply_title(ax, title)
+        fig.colorbar(surface, ax=ax, label="z (μm)")
+        if created_new:
+            fig.tight_layout()
+        return fig
+
+    skfem_plot(
+        basis_2d,
+        z_um,
+        ax=ax,
+        cmap="jet",
+        nrefs=1,
+        colorbar=False,
+    )
+    ax.set_xlabel("x (mm)")
+    ax.set_ylabel("y (mm)")
+    _apply_title(ax, title)
+    ax.set_aspect("equal")
+    mappable = ax.collections[-1] if ax.collections else None
+    if mappable is not None:
+        fig.colorbar(mappable, ax=ax, label="z (μm)")
+    if created_new:
+        fig.tight_layout()
+    return fig
 
 
 def plot_bearing_shape(bearing):
-    """Plot bearing shapes."""
-    figs = []
-    b = bearing
+    """Generate all bearing geometry plots (XY, XZ, 3D mesh).
 
-    figs.append(plot_xy_shape(b))
-    figs.append(plot_xz_shape(b))
+    Args:
+        bearing: Bearing object.
 
+    Returns:
+        list: List of matplotlib Figure objects.
+    """
+    figs = [plot_xy_shape(bearing), plot_xz_shape(bearing)]
+    if getattr(getattr(bearing, "fem_2d", None), "basis", None) is not None:
+        figs.append(plot_geometry_error(bearing))
     return figs
 
 
-def plot_load_capacity(bearing, results):
-    """Plot the load capacity."""
-    results = [results] if not isinstance(results, list) else results
-    fig = go.Figure()
-    b = bearing
+def plot_legend_only(results, *, ax=None):
+    """Generate a standalone legend figure from results.
 
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
+    Args:
+        results: Result object or list of Result objects.
+        ax: Matplotlib axes or None to create new.
 
-        fig.add_trace(
-            go.Scatter(
-                x=b.ha.flatten() * 1e6,
-                y=result.w,
-                name=result.name,
-                mode="lines+markers",
-                marker=dict(
-                    color=color,
-                    size=[8 if i == idx_k_max else 0 for i in range(b.nx)],
-                    symbol="circle",
-                ),
-                line=dict(color=color),
+    Returns:
+        matplotlib.figure.Figure: Figure containing legend only.
+    """
+    results = _as_list(results)
+    fig, ax, created_new = _ensure_axes(ax=ax, figsize=(5, 1.2))
+    handles = []
+    seen = {}
+    for idx, result in enumerate(results):
+        name = getattr(result, "name", "result")
+        if name in seen:
+            continue
+        seen[name] = idx
+        handles.append(
+            Line2D(
+                [0],
+                [0],
+                color=_solver_color(result, index=idx),
+                linestyle=_solver_linestyle(result, index=idx),
+                marker=_solver_marker(result, index=idx),
+                lw=2,
+                label=name,
             )
         )
-
-    fig.update_xaxes(title_text="h (μm)", range=[0, b.ha_max * 1e6], **AXIS_STYLE)
-    fig.update_yaxes(title_text="w (N)", range=[None, None], **AXIS_STYLE)
-    fig.update_layout(title="Load Capacity", **FIG_LAYOUT)
+    if handles:
+        _style_legend(
+            ax.legend(handles=handles, loc="center", ncol=max(1, len(handles)))
+        )
+    ax.axis("off")
+    if created_new:
+        fig.tight_layout()
     return fig
 
 
-def plot_stiffness(bearing, results):
-    """Plot the stiffness."""
-    results = [results] if not isinstance(results, list) else results
-    fig = go.Figure()
-    b = bearing
+def plot_subplots(
+    items,
+    plot_func,
+    *,
+    n_cols=2,
+    projection=None,
+    figsize=None,
+    figsize_per_subplot=(5.0, 4.0),
+    title_getter=None,
+    hide_unused=True,
+    plot_kwargs=None,
+):
+    """Create a grid of subplots by applying a function to each item.
 
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
+    Args:
+        items: Iterable of objects to plot.
+        plot_func: Callable(item, ax=ax, **plot_kwargs) that plots the item.
+        n_cols: Number of subplot columns. Defaults to 2.
+        projection: Axis projection type (e.g., '3d'). Defaults to None.
+        figsize: Explicit figure size (width, height) in inches.
+            If None, computed from items and figsize_per_subplot.
+        figsize_per_subplot: Default size per subplot when figsize
+            not provided. Defaults to (5.0, 4.0).
+        title_getter: Optional callable(item) that returns a title for each subplot.
+        hide_unused: Whether to hide unused subplot axes. Defaults to True.
+        plot_kwargs: Dict of additional keyword arguments for plot_func.
 
-        fig.add_trace(
-            go.Scatter(
-                x=b.ha.flatten() * 1e6,
-                y=result.k * 1e-6,
-                name=result.name,
-                mode="lines+markers",
-                marker=dict(
-                    color=color,
-                    size=[8 if i == idx_k_max else 0 for i in range(b.nx)],
-                    symbol="circle",
-                ),
-                line=dict(color=color),
-            )
+    Returns:
+        tuple: (figure, list_of_axes) for populated subplots.
+    """
+    items = list(items)
+    if not items:
+        return empty_figure(), []
+
+    n_cols = max(1, int(n_cols))
+    n_rows = int(np.ceil(len(items) / n_cols))
+
+    if figsize is None:
+        figsize = (
+            figsize_per_subplot[0] * n_cols,
+            figsize_per_subplot[1] * n_rows,
         )
 
-    fig.update_xaxes(title_text="h (μm)", range=[0, b.ha_max * 1e6], **AXIS_STYLE)
-    fig.update_yaxes(title_text="k (N/μm)", range=[None, None], **AXIS_STYLE)
-    fig.update_layout(title="Static stiffness", **FIG_LAYOUT)
-    return fig
+    fig = plt.figure(figsize=figsize)
+    axes = [
+        fig.add_subplot(n_rows, n_cols, index + 1, projection=projection)
+        if projection
+        else fig.add_subplot(n_rows, n_cols, index + 1)
+        for index in range(n_rows * n_cols)
+    ]
+
+    call_kwargs_base = dict(plot_kwargs or {})
+    for index, item in enumerate(items):
+        ax = axes[index]
+        call_kwargs = dict(call_kwargs_base)
+        call_kwargs["ax"] = ax
+        plot_func(item, **call_kwargs)
+        if title_getter is not None:
+            ax.set_title(title_getter(item))
+
+    if hide_unused:
+        for index in range(len(items), len(axes)):
+            axes[index].axis("off")
+
+    fig.tight_layout()
+    return fig, axes[: len(items)]
 
 
-def plot_pressure_distribution(bearing, results, slider=True):
-    """Plot the pressure distribution."""
-    results = [results] if not isinstance(results, list) else results
-    fig = go.Figure()
-    b = bearing
+def plot_key_results(bearing, results, *, legend=True):
+    """Generate a set of key result plots for comprehensive bearing analysis.
 
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
+    Creates plots for load capacity, stiffness, 1D pressure (if available),
+    supply and ambient flow rates, and optionally chamber flow, moment, and shear force.
 
-        if result.p.ndim == 2:
+    Args:
+        bearing: Bearing object.
+        results: Result object or list of Result objects.
+        legend: Whether to include legends in plots. Defaults to True.
 
-            fig.add_trace(
-                go.Scatter(
-                    x=[None],
-                    y=[None],
-                    mode="lines",
-                    line=dict(color=color),
-                    name=result.name,
-                    showlegend=True,
-                )
-            )
-
-            n_plots = 3
-            # h_plots = np.linspace(b.ha_min**0.5, b.ha_max**0.5, n_plots) ** 2
-            in_h = [1, idx_k_max, b.nh - 1]
-            h_plots = b.ha[in_h]
-            t_locations = np.round(np.linspace(b.nx, 0, n_plots + 2)[1:-1]).astype(int)
-            for h_plot, t_loc in zip(h_plots, t_locations):
-                in_h = np.abs(b.ha - h_plot).argmin()
-                pressures = (result.p[:, in_h] - b.pa) * 1e-6  # Convert to MPa
-                fig.add_trace(
-                    go.Scatter(
-                        x=b.x * 1e3,
-                        y=pressures,
-                        mode="lines+text",
-                        textposition="top center",
-                        text=[
-                            f"{h_plot*1e6:.2f} μm" if i == t_loc else None
-                            for i in range(b.nx)
-                        ],
-                        textfont=dict(color=color),
-                        name=f"{result.name} {h_plot*1e6:.1f} μm",
-                        line=dict(color=color),
-                        showlegend=False,
-                    ),
-                )
-                fig.update_xaxes(
-                    title_text="r (mm)", range=[0, b.xa * 1e3], **AXIS_STYLE
-                )
-                fig.update_yaxes(title_text="p (MPa)", range=[None, None], **AXIS_STYLE)
-        else:
-            pressures = (result.p - b.pa) * 1e-6  # Convert to MPa
-            if b.case == "journal":
-                fig.add_trace(
-                    go.Contour(
-                        z=pressures[:, :, np.argmax(result.k)],
-                        x=b.theta,
-                        y=b.y * 1e3,
-                        colorscale="Viridis",
-                        zmin=0,
-                        zmax=np.max(pressures),
-                        contours=dict(
-                            coloring="heatmap",
-                            showlabels=True,
-                            labelfont=dict(size=10, color="white"),
-                        ),
-                        colorbar=dict(title="p (MPa)", thickness=15),
-                        name=result.name,
-                    )
-                )
-            else:
-                fig.add_trace(
-                    go.Contour(
-                        z=pressures[:, :, np.argmax(result.k)],
-                        x=b.x * 1e3,
-                        y=b.y * 1e3,
-                        colorscale="Viridis",
-                        zmin=0,
-                        zmax=np.max(pressures),
-                        contours=dict(
-                            coloring="heatmap",
-                            showlabels=True,
-                            labelfont=dict(size=10, color="white"),
-                        ),
-                        colorbar=dict(title="p (MPa)", thickness=15),
-                        name=result.name,
-                    )
-                )
-
-            fig.update_xaxes(
-                title_text="theta (rad)" if b.case == "journal" else "x (mm)",
-                range=(
-                    [b.theta.min(), b.theta.max()]
-                    if b.case == "journal"
-                    else [b.x.min() * 1e3, b.x.max() * 1e3]
-                ),
-                **AXIS_STYLE,
-            )
-            fig.update_yaxes(
-                title_text="y (mm)",
-                range=[b.y.min() * 1e3, b.y.max() * 1e3],
-                **AXIS_STYLE,
-            )
-            steps = []
-            for i, h in enumerate(bearing.ha * 1e6):
-                step = dict(
-                    method="update",
-                    args=[
-                        {"z": [pressures[:, :, i]]},
-                        {
-                            "title": f"Pressure Distribution (h = {h:.1f})"
-                        },  # Update the title
-                    ],
-                    label=f"{h:.1f} μm",
-                )
-                steps.append(step)
-            sliders = [
-                dict(
-                    active=idx_k_max,
-                    currentvalue={
-                        "prefix": "Pressure distribution plot height: ",
-                        "font": {"size": 14},
-                    },
-                    pad={"t": 50},
-                    steps=steps,
-                )
-            ]
-            if slider:
-                fig.update_layout(sliders=sliders)
-
-        fig.update_layout(title="Pressure distribution", **FIG_LAYOUT)
-    return fig
-
-
-def plot_supply_flow_rate(bearing, results):
-    """Plot the supply flow rate."""
-    results = [results] if not isinstance(results, list) else results
-
-    fig = go.Figure()
-    b = bearing
-
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
-
-        fig.add_trace(
-            go.Scatter(
-                x=b.ha.flatten() * 1e6,
-                y=result.qs,
-                name=result.name,
-                mode="lines+markers",
-                marker=dict(
-                    color=color,
-                    size=[8 if i == idx_k_max else 0 for i in range(b.nx)],
-                    symbol="circle",
-                ),
-                line=dict(color=color),
-            )
-        )
-
-    fig.update_xaxes(title_text="h (μm)", range=[0, b.ha_max * 1e6], **AXIS_STYLE)
-    fig.update_yaxes(
-        title_text="q<sub>s</sub> (L/min)", range=[None, None], **AXIS_STYLE
+    Returns:
+        list: List of matplotlib Figure objects.
+    """
+    results = _as_list(results)
+    figs = [
+        plot_load_capacity(bearing, results, legend=legend),
+        plot_stiffness(bearing, results, legend=legend),
+    ]
+    if any(
+        getattr(result, "p", None) is not None
+        or getattr(result, "p_1d", None) is not None
+        for result in results
+    ):
+        figs.append(plot_pressure_1d(bearing, results, legend=legend))
+    figs.extend(
+        [
+            plot_supply_flow_rate(bearing, results, legend=legend),
+            plot_ambient_flow_rate(bearing, results, legend=legend),
+        ]
     )
-    fig.update_layout(title="Supply flow", **FIG_LAYOUT)
-    return fig
-
-
-def plot_chamber_flow_rate(bearing, results):
-    """Plot the chamber flow rate."""
-    results = [results] if not isinstance(results, list) else results
-    fig = go.Figure()
-    b = bearing
-
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
-        fig.add_trace(
-            go.Scatter(
-                x=b.ha.flatten() * 1e6,
-                y=result.qc,
-                name=result.name,
-                mode="lines+markers",
-                marker=dict(
-                    color=color,
-                    size=[8 if i == idx_k_max else 0 for i in range(b.nx)],
-                    symbol="circle",
-                ),
-                line=dict(color=color),
-            )
-        )
-
-    fig.update_xaxes(title_text="h (μm)", range=[0, b.ha_max * 1e6], **AXIS_STYLE)
-    fig.update_yaxes(
-        title_text="q<sub>c</sub> (L/min)", range=[None, None], **AXIS_STYLE
-    )
-    fig.update_layout(title="Chanber flow", **FIG_LAYOUT)
-    return fig
-
-
-def plot_ambient_flow_rate(bearing, results):
-    """Plot the ambient flow rate."""
-    results = [results] if not isinstance(results, list) else results
-
-    fig = go.Figure()
-    b = bearing
-
-    for result in results:
-        color = SOLVER_COLORS.get(result.name, "purple")
-        idx_k_max = np.argmax(result.k)
-
-        fig.add_trace(
-            go.Scatter(
-                x=b.ha.flatten() * 1e6,
-                y=result.qa,
-                name=result.name,
-                mode="lines+markers",
-                marker=dict(
-                    color=color,
-                    size=[8 if i == idx_k_max else 0 for i in range(b.nx)],
-                    symbol="circle",
-                ),
-                line=dict(color=color),
-            )
-        )
-
-    fig.update_xaxes(title_text="h (μm)", range=[0, b.ha_max * 1e6], **AXIS_STYLE)
-    fig.update_yaxes(
-        title_text="q<sub>a</sub> (L/min)", range=[None, None], **AXIS_STYLE
-    )
-    fig.update_layout(title="ambient flow", **FIG_LAYOUT)
-    return fig
-
-
-# def plot_bearing_shape(bearing):
-#     """Create bearing shape visualization
-
-#     Args:
-#         bearing: Bearing instance with geometry parameters
-#     """
-#     b = bearing
-#     # Create figure
-#     # fig = go.Figure()
-#     fig = sp.make_subplots(rows=1, cols=2, subplot_titles=("XY Geometry", "XZ Profile"))
-
-#     plot_xz_shape(b, fig)
-#     plot_xy_shape(b, fig)
-
-#     for i in range(1, 3):
-#         fig.update_xaxes(AXIS_STYLE, row=1, col=i)
-#         fig.update_yaxes(AXIS_STYLE, row=1, col=i)
-
-#     fig.update_layout(
-#         font=PLOT_FONT,
-#         height=300,
-#         showlegend=True,
-#         plot_bgcolor="white",
-#         paper_bgcolor="white",
-#         margin=dict(l=20, r=20, t=20, b=20),
-#         legend=dict(orientation="h", yanchor="bottom", y=1.1, xanchor="center", x=0.5),
-#     )
-#     return fig
-
-
-def plot_xy_shape(bearing):
-    fig = go.Figure()
-    b = bearing
-    # SHAPE XY
-    match b.case:
-        case "annular" | "circular":
-
-            # outer circle
-            theta = np.linspace(0, 2 * np.pi, 100)
-            xa = b.xa * np.cos(theta) * 1e3
-            ya = b.xa * np.sin(theta) * 1e3
-            fig.add_trace(
-                go.Scatter(
-                    x=xa,
-                    y=ya,
-                    fill="toself",
-                    fillcolor="lightgrey",
-                    line=dict(color="black"),
-                    name="Shape",
-                    showlegend=True,
-                ),
-            )
-
-            # inner hole
-            if b.case == "annular":
-                xc = b.xc * np.cos(theta) * 1e3
-                yc = b.xc * np.sin(theta) * 1e3
-                fig.add_trace(
-                    go.Scatter(
-                        x=xc,
-                        y=yc,
-                        fill="toself",
-                        fillcolor="white",
-                        line=dict(color="black"),
-                        name="Shape",
-                        showlegend=False,
-                    ),
-                )
-
-            # symmetry lines
-            fig.add_trace(
-                go.Scatter(
-                    x=[0, 0],
-                    y=[-b.xa * 0.2e3, b.xa * 0.2e3],
-                    mode="lines",
-                    line=dict(color="gray", width=1, dash="dashdot"),
-                    showlegend=False,
-                ),
-            )
-            fig.add_trace(
-                go.Scatter(
-                    x=[-b.xa * 0.2e3, b.xa * 0.2e3],
-                    y=[0, 0],
-                    mode="lines",
-                    line=dict(color="gray", width=1, dash="dashdot"),
-                    showlegend=False,
-                ),
-            )
-
-        case "infinite":
-            # right edge
-            fig.add_trace(
-                go.Scatter(
-                    x=np.array([1, 1]) * b.xa * 1e3,
-                    y=np.array([0, 1000]),
-                    mode="lines",
-                    line=dict(color="black"),
-                    name="Shape",
-                    showlegend=False,
-                ),
-            )
-            # left edge
-            fig.add_trace(
-                go.Scatter(
-                    x=np.array([0, 0]),
-                    y=np.array([0, 1000]),
-                    fill="tonextx",
-                    fillcolor="lightgrey",
-                    mode="lines",
-                    line=dict(color="black"),
-                    name="Shape",
-                    showlegend=False,
-                ),
-            )
-
-            fig.update_yaxes(range=[0, 1000])
-
-            fig.update_xaxes(
-                range=np.array([-0.5, 1.5]) * b.xa * 1e3,
-            )
-
-        case "rectangular":
-            fig.add_trace(
-                go.Scatter(
-                    x=np.array([-1, -1, 1, 1, -1]) * b.xa * 0.5e3,
-                    y=np.array([-1, 1, 1, -1, -1]) * b.ya * 0.5e3,
-                    fill="toself",
-                    fillcolor="lightgrey",
-                    mode="lines",
-                    line=dict(color="black"),
-                    name="Shape",
-                    showlegend=False,
-                ),
-            )
-            fig.update_yaxes(
-                range=np.array([-0.6, 0.6]) * b.ya * 1e3,
-                **AXIS_STYLE,
-            )
-            fig.update_xaxes(
-                range=np.array([-0.6, 0.6]) * b.xa * 1e3,
-                scaleanchor="y",
-                scaleratio=1,
-                **AXIS_STYLE,
-            )
-
-        case _:
-            pass
-
-    fig.update_xaxes(title="x (mm)", **AXIS_STYLE)
-    fig.update_yaxes(
-        title="y (mm)",
-        scaleanchor=False if b.csys == "cartesian" else "x",
-        scaleratio=1,
-        **AXIS_STYLE,
-    )
-    fig.update_layout(title="XY profile", **FIG_LAYOUT)
-    return fig
-
-
-def plot_xz_shape(bearing):
-    b = bearing
-    fig = go.Figure()
-
-    if b.ny > 1:
-        if b.case == "circular" or b.case == "annular":
-            zr = (b.geom.T).flatten()
-            xr = (b.x[None, :] * np.cos(b.y)[:, None]).flatten()
-            yr = (b.x[None, :] * np.sin(b.y)[:, None]).flatten()
-
-            print(xr.shape, yr.shape, zr.shape)
-            # Define a regular grid over the data
-            x = np.linspace(-b.xa, b.xa, 99)
-            y = x
-            xg, yg = np.meshgrid(x, y)
-            # evaluate the z-values at the regular grid through cubic interpolation
-            z = griddata((xr, yr), zr, (xg, yg), method="cubic")
-            if b.case == "annular":
-                dist = np.sqrt(xg**2 + yg**2)
-                z[dist < b.xc] = np.nan
-            fig.update_xaxes(
-                title_text="x (mm)",
-                range=np.array([-1.1, 1.1]) * b.xa * 1e3,
-                scaleanchor="y",
-            )
-
-            fig.update_yaxes(
-                title_text="y (mm)",
-                range=np.array([-1.1, 1.1]) * b.xa * 1e3,
-            )
-
-        elif b.case == "rectangular":
-            z = b.geom.T
-            x = b.x
-            y = b.y
-            fig.update_xaxes(
-                title_text="x (mm)",
-                range=np.array([-1, 1]) * 0.5 * b.xa * 1e3,
-                **AXIS_STYLE,
-            )
-            fig.update_yaxes(
-                title_text="y (mm)",
-                range=np.array([-1, 1]) * 0.5 * b.ya * 1e3,
-                **AXIS_STYLE,
-            )
-        elif b.case == "journal":
-            z = b.geom.T
-            x = b.x / b.xa
-            y = b.y
-            fig.update_xaxes(
-                title_text="theta (rad)",
-                range=np.array([-1.1, 1.1]) * np.pi,
-                **AXIS_STYLE,
-            )
-            fig.update_yaxes(
-                title_text="y (mm)",
-                range=np.array([-0.6, 0.6]) * b.ya * 1e3,
-                **AXIS_STYLE,
-            )
-
-        fig.add_trace(
-            go.Contour(
-                z=z * 1e6,
-                x=x * 1e3,
-                y=y * 1e3,
-                colorscale="Viridis",
-                zmin=0,
-                zmax=b.error * 1e6,
-                contours=dict(
-                    coloring="heatmap",
-                    showlabels=True,
-                    labelfont=dict(size=10, color="white"),
-                ),
-                colorbar=dict(title="(μm)", thickness=15),
-                name="Profile",
-            ),
-        )
-        fig.update_layout(title="XYZ profile", **FIG_LAYOUT)
-
-    else:
-        # PROFILE XZ
-        match b.case:
-            case "circular":
-                x = np.concatenate(([-b.x[-1]], -np.flip(b.x), b.x, [b.x[-1]])) * 1e3
-                y = np.concatenate(([100], np.flip(b.geom), b.geom, [100])) * 1e6
-                t = ["Bearing<br>" if i == b.nx else None for i in range(b.nx * 2)]
-            case "annular":
-                x = (
-                    np.concatenate(
-                        ([-b.x[-1]], -np.flip(b.x), [b.x[1]], [b.x[1]], b.x, [b.x[-1]])
-                    )
-                    * 1e3
-                )
-                y = (
-                    np.concatenate(
-                        ([100], np.flip(b.geom), [100], [100], b.geom, [100])
-                    )
-                    * 1e6
-                )
-                t = [
-                    (
-                        "Bearing<br>"
-                        if i == i in [b.nx // 2, 2 + b.nx + b.nx // 2]
-                        else None
-                    )
-                    for i in range(b.nx * 2)
-                ]
-            case "infinite":
-                x = np.concatenate(([b.x[1]], b.x, [b.x[-1]])) * 1e3
-                y = np.concatenate(([100], b.geom, [100])) * 1e6
-                t = ["Bearing<br>" if i == b.nx // 2 else None for i in range(b.nx)]
-            case _:
-                pass
-
-        fig.add_trace(
-            go.Scatter(
-                x=x,
-                y=y,
-                fill="toself",
-                fillcolor="lightgrey",
-                mode="lines+text",
-                textposition="top center",
-                text=t,
-                textfont=dict(size=14),
-                line=dict(color="black"),
-                name="Bearing",
-                showlegend=True,
-            ),
-        )
-
-        # Guide surface XZ
-        fig.add_trace(
-            go.Scatter(
-                x=np.array(
-                    [
-                        (x[-1] - x[-1] * 1.2 if x[1] == 0 else x[1] * 1.2),
-                        (x[1] + x[-1]) / 2,
-                        x[-1] * 1.2,
-                    ]
-                ),  # Convert to mm
-                y=np.ones(3) * -0.1,  # Convert to um
-                mode="lines+text",
-                textposition="bottom center",
-                text=[None, "<br>Guide surface", None],
-                textfont=dict(size=14),
-                line=dict(color="gray"),
-                name="Shape",
-                showlegend=False,
-            ),
-        )
-
-        # symmetry line
-        if b.csys == "polar":
-            fig.add_trace(
-                go.Scatter(
-                    x=[0, 0],
-                    y=[-100, 100],
-                    mode="lines",
-                    line=dict(color="gray", width=1, dash="dashdot"),
-                    showlegend=False,
-                ),
-            )
-
-        fig.update_xaxes(
-            title="x (mm)",
-            range=[(x[-1] - x[-1] * 1.1 if x[1] == 0 else x[1] * 1.1), x[-1] * 1.1],
-            **AXIS_STYLE,
-        )
-        fig.update_yaxes(
-            title="Shape (μm)",
-            range=[-0.5 - 0.3e6 * abs(b.error), 1 + np.max(b.geom) * 1e6],
-            **AXIS_STYLE,
-        )
-        fig.update_layout(title="XZ profile", **FIG_LAYOUT)
-    return fig
+    if bearing.type == "seal":
+        figs.append(plot_chamber_flow_rate(bearing, results, legend=legend))
+    if any(getattr(result, "moment", None) is not None for result in results):
+        figs.append(plot_moment(bearing, results, legend=legend))
+    if any(getattr(result, "shear_force", None) is not None for result in results):
+        figs.append(plot_shear_force(bearing, results, legend=legend))
+    return figs
 
 
 def empty_figure():
-    """Create an empty figure with default layout."""
-    fig = go.Figure()
-    fig.update_layout(
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        plot_bgcolor="White",
-        margin=dict(l=0, r=0, t=0, b=0),
-    )
+    """Create an empty figure with axes turned off.
+
+    Useful as a placeholder when plotting is not possible due to missing data.
+
+    Returns:
+        matplotlib.figure.Figure: Empty figure.
+    """
+    fig, ax = plt.subplots()
+    ax.axis("off")
+    fig.tight_layout()
     return fig
+
+
+def apply_export_layout(figure: Figure):
+    """Apply export-ready layout formatting to a figure.
+
+    Prepares figure for file export (PDF, PNG, etc.).
+    Currently a pass-through placeholder for future layout adjustments.
+
+    Args:
+        figure: matplotlib Figure object.
+
+    Returns:
+        matplotlib.figure.Figure: The same figure object.
+    """
+    return figure
