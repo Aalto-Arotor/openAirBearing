@@ -295,8 +295,8 @@ class BaseBearing:
             self.dy, lambda: 1 if self.ny == 1 else np.gradient(self.y)
         )
         self.A = get_area(self)
-        self.kappa = get_kappa(self)
-        self.beta = get_beta(self)
+        self.kappa = self._coalesce(self.kappa, lambda: get_kappa(self))
+        self.beta = self._coalesce(self.beta, lambda: get_beta(self))
 
 
 @dataclass
@@ -311,7 +311,7 @@ class CircularBearing(BaseBearing):
     xc: float = 1e-6
     xa: float = 37e-3 / 2
     Qsc: float = 2.8  # L/min
-    divs: int = 3
+    #divs: int = 3
 
     def __post_init__(self):
         super().__post_init__()
