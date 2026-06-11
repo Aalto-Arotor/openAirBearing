@@ -4,7 +4,7 @@ This package provides tools for analyzing and visualizing air bearing performanc
 """
 
 # Version information
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 # Import specific bearing classes
 # Import app factory for direct package-level access

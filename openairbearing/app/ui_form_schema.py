@@ -260,4 +260,3 @@ NY_PARAMETER_FIELDS = [
         "step": 1,
     }
 ]
-

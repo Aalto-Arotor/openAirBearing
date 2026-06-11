@@ -311,7 +311,7 @@ class CircularBearing(BaseBearing):
     xc: float = 1e-6
     xa: float = 37e-3 / 2
     Qsc: float = 2.8  # L/min
-    #divs: int = 3
+    # divs: int = 3
 
     def __post_init__(self):
         super().__post_init__()
