@@ -261,14 +261,3 @@ NY_PARAMETER_FIELDS = [
     }
 ]
 
-FEM_PARAMETER_FIELDS = [
-    {
-        "label": "Mesh divisions",
-        "input_id": "divs-input",
-        "reset_id": "divs-reset",
-        "value_key": "divs",
-        "min_value": 1,
-        "max_value": None,
-        "step": 1,
-    }
-]

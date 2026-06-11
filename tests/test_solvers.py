@@ -32,6 +32,24 @@ def test_get_pressure_analytic_circular():
     assert np.all(p <= bearing.ps + 1e-6)
 
 
+def test_user_kappa_is_preserved_and_affects_analytic_flow():
+    low_kappa = 2e-15
+    high_kappa = 2e-14
+
+    low = CircularBearing(xa=10e-3, kappa=low_kappa, nh=12)
+    high = CircularBearing(xa=10e-3, kappa=high_kappa, nh=12)
+
+    assert low.kappa == pytest.approx(low_kappa)
+    assert high.kappa == pytest.approx(high_kappa)
+
+    low_result = solve_bearing_analytic(low)
+    high_result = solve_bearing_analytic(high)
+
+    assert np.mean(high_result.qa) > np.mean(low_result.qa)
+    assert np.mean(high_result.qs) > np.mean(low_result.qs)
+    assert not np.allclose(high_result.qa, low_result.qa)
+
+
 # def test_oab_mesh_quad1_annulus():
 #     """Test OABMeshQuad1 annulus mesh creation and boundaries."""
 #     m = OABMeshQuad1.init_annulus(25e-3, 58e-3, ntheta=12, nr=6)

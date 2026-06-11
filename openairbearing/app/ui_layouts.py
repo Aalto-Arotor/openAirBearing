@@ -8,7 +8,6 @@ from dash import dcc, html
 from openairbearing.app.ui_form_schema import (
     BEARING_PARAMETER_FIELDS,
     CHAMBER_PARAMETER_FIELDS,
-    FEM_PARAMETER_FIELDS,
     FLOW_PARAMETER_FIELDS,
     FLUID_PARAMETER_FIELDS,
     INNER_RADIUS_FIELDS,
@@ -281,11 +280,6 @@ def create_input_layout(default_bearing):
             html.Div(
                 _render_resettable_fields(MODEL_PARAMETER_FIELDS, defaults),
                 style=STYLES["input_container"],
-            ),
-            html.Div(
-                _render_resettable_fields(FEM_PARAMETER_FIELDS, defaults),
-                id="divs-container",
-                style=STYLES["toggle_container"],
             ),
             html.Div(
                 _render_resettable_fields(NY_PARAMETER_FIELDS, defaults),

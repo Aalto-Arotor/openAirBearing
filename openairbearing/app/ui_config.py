@@ -146,16 +146,15 @@ BASE_TOGGLE_STYLE = {
 }
 
 CASE_CONTAINER_VISIBILITY = {
-    "circular": {"pc": True, "xc": False, "ya": False, "ny": False, "divs": True},
-    "annular": {"pc": True, "xc": True, "ya": False, "ny": True, "divs": False},
-    "infinite": {"pc": True, "xc": False, "ya": False, "ny": False, "divs": False},
-    "rectangular": {"pc": True, "xc": False, "ya": True, "ny": True, "divs": False},
+    "circular": {"pc": True, "xc": False, "ya": False, "ny": False},
+    "annular": {"pc": True, "xc": True, "ya": False, "ny": True},
+    "infinite": {"pc": True, "xc": False, "ya": False, "ny": False},
+    "rectangular": {"pc": True, "xc": False, "ya": True, "ny": True},
     "journal": {
         "pc": True,
         "xc": False,
         "ya": True,
         "ny": True,
-        "divs": False,
         "journal": True,
     },
 }
@@ -200,7 +199,6 @@ def get_container_styles(case):
             "xc": False,
             "ya": False,
             "ny": False,
-            "divs": False,
             "journal": False,
         },
     )
@@ -213,6 +211,5 @@ def get_container_styles(case):
         _style(visibility["xc"]),
         _style(visibility["ya"]),
         _style(visibility["ny"]),
-        _style(visibility["divs"]),
         _style(visibility.get("journal", False)),
     )

@@ -24,7 +24,6 @@ FORM_FIELD_ORDER = [
     "nx",
     "ny",
     "nh",
-    "divs",
     "error",
     "psi",
     "ux",
@@ -56,7 +55,6 @@ def bearing_to_form_values(bearing):
         "nx": bearing.nx,
         "ny": bearing.ny,
         "nh": bearing.nh,
-        "divs": getattr(bearing, "divs", 3),
         "error": bearing.error * 1e6,
         "psi": bearing.Psi,
         "ux": float(np.asarray(bearing.u).ravel()[0])
@@ -113,6 +111,4 @@ def form_to_bearing_kwargs(form_values, case=None):
                 ),
             }
         )
-    if case == "circular":
-        kwargs["divs"] = int(form_values.get("divs") or 3)
     return kwargs
