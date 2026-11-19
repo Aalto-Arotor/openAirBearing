@@ -30,17 +30,21 @@ FORM_FIELD_ORDER = [
     "uy",
 ]
 
+# Axisymmetric cases expose radial dimensions as diameters in the form.
+AXISYMMETRIC_CASES = ("circular", "annular")
+
 
 def bearing_to_form_values(bearing):
     """Convert bearing SI attributes to UI form units and field names."""
     bore_diameter = getattr(bearing, "bore_diameter", None)
     shaft_diameter = getattr(bearing, "shaft_diameter", None)
     clearance = getattr(bearing, "clearance", None)
+    radial_scale = 2.0 if getattr(bearing, "case", None) in AXISYMMETRIC_CASES else 1.0
     return {
         "mu": bearing.mu,
         "hp": bearing.hp * 1e3,
-        "xa": bearing.xa * 1e3,
-        "xc": bearing.xc * 1e3,
+        "xa": bearing.xa * radial_scale * 1e3,
+        "xc": bearing.xc * radial_scale * 1e3,
         "ya": bearing.ya * 1e3,
         "bore_diameter": bore_diameter * 1e3 if bore_diameter is not None else None,
         "shaft_diameter": shaft_diameter * 1e3 if shaft_diameter is not None else None,
@@ -68,14 +72,15 @@ def bearing_to_form_values(bearing):
 
 def form_to_bearing_kwargs(form_values, case=None):
     """Convert form values to bearing constructor kwargs in SI units."""
+    radial_scale = 0.5 if case in AXISYMMETRIC_CASES else 1.0
     kwargs = {
         "pa": form_values["pa"] * 1e6,
         "ps": form_values["ps"] * 1e6,
         "pc": form_values["pc"] * 1e6,
         "mu": form_values["mu"],
         "hp": form_values["hp"] * 1e-3,
-        "xa": form_values["xa"] * 1e-3,
-        "xc": form_values["xc"] * 1e-3,
+        "xa": form_values["xa"] * radial_scale * 1e-3,
+        "xc": form_values["xc"] * radial_scale * 1e-3,
         "ya": form_values["ya"] * 1e-3,
         "nx": int(form_values["nx"]),
         "ny": int(form_values["ny"]),
@@ -98,6 +103,8 @@ def form_to_bearing_kwargs(form_values, case=None):
         shaft_diameter = form_values.get("shaft_diameter")
         kwargs.update(
             {
+                # Circumferential span is derived from the diameters.
+                "ya": None,
                 "bore_diameter": (
                     None if bore_diameter is None else bore_diameter * 1e-3
                 ),

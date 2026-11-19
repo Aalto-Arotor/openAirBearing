@@ -21,6 +21,7 @@ from openairbearing.app.ui_config import (
     get_default_error,
     get_default_solvers,
     get_error_options,
+    get_geometry_labels,
     get_solver_options,
 )
 from openairbearing.app.ui_export_utils import build_export_zip
@@ -1163,6 +1164,16 @@ def register_callbacks(app):
         center radius, span dimension, angular resolution, journal diameter inputs).
         """
         return get_container_styles(case)
+
+    @app.callback(
+        Output("xa-label", "children"),
+        Output("xc-label", "children"),
+        Output("ya-label", "children"),
+        Input("case-select", "value"),
+    )
+    def update_geometry_labels(case):
+        """Label geometry inputs as diameters or lengths to match the case."""
+        return get_geometry_labels(case)
 
     @app.callback(
         Output("clearance-input", "value"),

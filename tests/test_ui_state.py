@@ -6,7 +6,12 @@ from openairbearing.app.ui_state import (
     bearing_to_form_values,
     form_to_bearing_kwargs,
 )
-from openairbearing.bearings import CircularBearing, JournalBearing
+from openairbearing.bearings import (
+    AnnularBearing,
+    CircularBearing,
+    JournalBearing,
+    RectangularBearing,
+)
 
 
 def test_bearing_to_form_values_units():
@@ -14,7 +19,7 @@ def test_bearing_to_form_values_units():
     values = bearing_to_form_values(bearing)
 
     assert values["hp"] == pytest.approx(bearing.hp * 1e3)
-    assert values["xa"] == pytest.approx(bearing.xa * 1e3)
+    assert values["xa"] == pytest.approx(2 * bearing.xa * 1e3)
     assert values["pa"] == pytest.approx(bearing.pa * 1e-6)
     assert values["ha_min"] == pytest.approx(bearing.ha_min * 1e6)
     assert values["error"] == pytest.approx(bearing.error * 1e6)
@@ -32,7 +37,7 @@ def test_form_to_bearing_kwargs_units_and_types():
         "error_type": "linear",
     }
 
-    kwargs = form_to_bearing_kwargs(form_values)
+    kwargs = form_to_bearing_kwargs(form_values, case="circular")
 
     assert kwargs["hp"] == pytest.approx(bearing.hp)
     assert kwargs["xa"] == pytest.approx(bearing.xa)
@@ -57,6 +62,23 @@ def test_journal_form_roundtrip_uses_diameters_for_clearance():
     assert kwargs["bore_diameter"] == pytest.approx(80e-3)
     assert kwargs["shaft_diameter"] == pytest.approx(79.9e-3)
     assert kwargs["clearance"] == pytest.approx(0.05e-3)
+    assert kwargs["ya"] is None
+    assert kwargs["xa"] == pytest.approx(bearing.xa)
+
+
+@pytest.mark.parametrize(
+    "bearing_cls", [CircularBearing, AnnularBearing, RectangularBearing]
+)
+def test_geometry_form_roundtrip(bearing_cls):
+    bearing = bearing_cls()
+    values = bearing_to_form_values(bearing)
+    kwargs = form_to_bearing_kwargs(
+        {**values, "error_type": "none"}, case=bearing.case
+    )
+
+    assert kwargs["xa"] == pytest.approx(bearing.xa)
+    assert kwargs["xc"] == pytest.approx(bearing.xc)
+    assert kwargs["ya"] == pytest.approx(bearing.ya)
 
 
 def test_form_field_order_matches_form_values_keys():

@@ -38,7 +38,9 @@ def test_recompute_from_app_state_returns_consistent_outputs():
         "kappa": bearing.kappa,
         "Qsc": bearing.Qsc,
         "triggered_input": "case-select",
-        "bearing_kwargs": form_to_bearing_kwargs({**form_values, "error_type": "none"}),
+        "bearing_kwargs": form_to_bearing_kwargs(
+            {**form_values, "error_type": "none"}, case="circular"
+        ),
     }
 
     out_bearing, results, static_2d, moving_2d, shared_z_range, new_kappa, new_qsc = (

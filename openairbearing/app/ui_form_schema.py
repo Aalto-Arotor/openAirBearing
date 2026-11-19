@@ -60,7 +60,8 @@ BEARING_PARAMETER_FIELDS = [
         "min_value": 0.01,
     },
     {
-        "label": "Outer radius / x length (mm)",
+        "label": "Diameter (mm)",
+        "label_id": "xa-label",
         "input_id": "xa-input",
         "reset_id": "xa-reset",
         "value_key": "xa",
@@ -70,7 +71,8 @@ BEARING_PARAMETER_FIELDS = [
 
 INNER_RADIUS_FIELDS = [
     {
-        "label": "Inner radius (mm)",
+        "label": "Inner diameter (mm)",
+        "label_id": "xc-label",
         "input_id": "xc-input",
         "reset_id": "xc-reset",
         "value_key": "xc",
@@ -81,6 +83,7 @@ INNER_RADIUS_FIELDS = [
 LENGTH_FIELDS = [
     {
         "label": "y length (mm)",
+        "label_id": "ya-label",
         "input_id": "ya-input",
         "reset_id": "ya-reset",
         "value_key": "ya",

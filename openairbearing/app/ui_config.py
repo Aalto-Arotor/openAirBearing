@@ -153,11 +153,31 @@ CASE_CONTAINER_VISIBILITY = {
     "journal": {
         "pc": True,
         "xc": False,
-        "ya": True,
+        "ya": False,
         "ny": True,
         "journal": True,
     },
 }
+
+CASE_GEOMETRY_LABELS = {
+    "circular": {"xa": "Diameter (mm)"},
+    "annular": {"xa": "Outer diameter (mm)", "xc": "Inner diameter (mm)"},
+    "infinite": {"xa": "x width (mm)"},
+    "rectangular": {"xa": "x width (mm)", "ya": "y length (mm)"},
+    "journal": {"xa": "Journal length (mm)"},
+}
+
+_DEFAULT_GEOMETRY_LABELS = {
+    "xa": "x width (mm)",
+    "xc": "Inner diameter (mm)",
+    "ya": "y length (mm)",
+}
+
+
+def get_geometry_labels(case):
+    """Return (xa, xc, ya) input labels matching the geometry of a case."""
+    labels = {**_DEFAULT_GEOMETRY_LABELS, **CASE_GEOMETRY_LABELS.get(case, {})}
+    return labels["xa"], labels["xc"], labels["ya"]
 
 
 def get_solver_options(case):
